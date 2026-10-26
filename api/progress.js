@@ -1,34 +1,49 @@
-import { Redis } from '@upstash/redis';
+import { createClient } from 'redis';
 import crypto from 'node:crypto';
 
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN,
-});
 const HASH = 'auris:progress';
+let client;
+async function db() {
+  if (!client) {
+    const c = createClient({ url: process.env.REDIS_URL });
+    c.on('error', () => {});
+    await c.connect();
+    client = c;
+  }
+  return client;
+}
+
 const sha = (s) => crypto.createHash('sha256').update(String(s)).digest();
+// Accepts SYNC_KEY and any variable ending in _SYNC_KEY (for example VALAR_SYNC_KEY, TITUS_SYNC_KEY).
+const keys = () => Object.entries(process.env).filter(([k, v]) => v && (k === 'SYNC_KEY' || k.endsWith('_SYNC_KEY'))).map(([, v]) => v);
+const authorized = (given) => !!given && keys().some((k) => crypto.timingSafeEqual(sha(given), sha(k)));
 
 export default async function handler(req, res) {
-  const given = req.headers['x-sync-key'] || '';
-  const expected = process.env.SYNC_KEY || '';
-  if (!expected || !given || !crypto.timingSafeEqual(sha(given), sha(expected))) {
-    return res.status(401).json({ error: 'unauthorized' });
+  if (!authorized(req.headers['x-sync-key'])) return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const r = await db();
+    if (req.method === 'GET') {
+      const raw = await r.hGetAll(HASH);
+      return res.status(200).json({ items: Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, JSON.parse(v)])) });
+    }
+    if (req.method === 'POST') {
+      const b = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+      const ok = /^[a-f0-9]{64}$/.test(b.id) && Number.isFinite(b.position) && b.position >= 0 && Number.isFinite(b.updatedAt);
+      if (!ok) return res.status(400).json({ error: 'bad body' });
+      const oldRaw = await r.hGet(HASH, b.id);
+      const old = oldRaw ? JSON.parse(oldRaw) : null;
+      if (old && old.updatedAt >= b.updatedAt) return res.status(200).json({ stale: true, item: old });
+      const item = {
+        id: b.id, part: Number.isInteger(b.part) && b.part >= 0 ? b.part : 0, device: String(b.device || '').slice(0, 60),
+        position: b.position, duration: Number(b.duration) || 0, updatedAt: b.updatedAt, finished: !!b.finished,
+        title: String(b.title || '').slice(0, 200), author: String(b.author || '').slice(0, 200),
+      };
+      await r.hSet(HASH, b.id, JSON.stringify(item));
+      return res.status(200).json({ item });
+    }
+    return res.status(405).json({ error: 'method not allowed' });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: 'server error' });
   }
-  if (req.method === 'GET') {
-    return res.status(200).json({ items: (await redis.hgetall(HASH)) || {} });
-  }
-  if (req.method === 'POST') {
-    const b = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
-    const ok = /^[a-f0-9]{64}$/.test(b.id) && Number.isFinite(b.position) && b.position >= 0 && Number.isFinite(b.updatedAt);
-    if (!ok) return res.status(400).json({ error: 'bad body' });
-    const old = await redis.hget(HASH, b.id);
-    if (old && old.updatedAt >= b.updatedAt) return res.status(200).json({ stale: true, item: old });
-    const item = {
-      id: b.id, part: Number.isInteger(b.part) && b.part >= 0 ? b.part : 0, device: String(b.device || '').slice(0, 60), position: b.position, duration: Number(b.duration) || 0, updatedAt: b.updatedAt,
-      finished: !!b.finished, title: String(b.title || '').slice(0, 200), author: String(b.author || '').slice(0, 200),
-    };
-    await redis.hset(HASH, { [b.id]: item });
-    return res.status(200).json({ item });
-  }
-  return res.status(405).json({ error: 'method not allowed' });
 }
