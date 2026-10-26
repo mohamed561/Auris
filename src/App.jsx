@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { getAll, getBook, putBook, getHandle, putHandle, device, fmt, mime, cleanName, hashText, fingerprint, readMeta, searchBooks, pickFiles, openHandle, pull, push, toItem } from './lib.js';
+import { getAll, getBook, putBook, getHandle, putHandle, device, fmt, mime, cleanName, hashText, fingerprint, readMeta, searchBooks, pickFiles, openHandle, pull, pullAll, pushMeta, push, toItem } from './lib.js';
 
 const useCover = (b) => {
   const u = useMemo(() => (b.cover ? URL.createObjectURL(b.cover) : ''), [b.cover]);
-  return u || b.coverUrl || '';
+  return b.coverUrl || u;
 };
 const cancelled = (e) => e?.name === 'AbortError' || e?.message === 'none';
 
@@ -15,12 +15,33 @@ export default function App() {
   const [order, setOrder] = useState(null);
   const [ask, setAsk] = useState(null);
   const [msg, setMsg] = useState('');
+  const [naming, setNaming] = useState(null);
+  const [inst, setInst] = useState(null);
+  useEffect(() => { const h = (e) => { e.preventDefault(); setInst(e); }; addEventListener('beforeinstallprompt', h); return () => removeEventListener('beforeinstallprompt', h); }, []);
 
   const refresh = async () => setBooks((await getAll()).sort((a, b) => (b.updatedAt || b.addedAt) - (a.updatedAt || a.addedAt)));
   const flush = async () => {
     for (const b of await getAll()) if (b.dirty) push(toItem(b)).then(async () => putBook({ ...(await getBook(b.id)), dirty: false })).catch(() => {});
   };
-  useEffect(() => { refresh(); flush(); addEventListener('online', flush); return () => removeEventListener('online', flush); }, []);
+  // Titles, authors and covers follow the book to every device; the newest edit wins.
+  const syncMeta = async () => {
+    try {
+      const { meta } = await pullAll();
+      let changed = false;
+      for (const b of await getAll()) {
+        const m = meta[b.id], t = b.metaAt || b.addedAt || 0;
+        if (m && m.metaAt > t) { await putBook({ ...b, title: m.title, author: m.author, coverUrl: m.coverUrl, metaAt: m.metaAt }); changed = true; }
+        else if (t > (m?.metaAt || 0)) pushMeta({ ...b, metaAt: t }).catch(() => {});
+      }
+      if (changed) refresh();
+    } catch {}
+  };
+  useEffect(() => {
+    refresh(); flush(); syncMeta();
+    const vis = () => document.visibilityState === 'visible' && syncMeta();
+    addEventListener('online', flush); document.addEventListener('visibilitychange', vis);
+    return () => { removeEventListener('online', flush); document.removeEventListener('visibilitychange', vis); };
+  }, []);
 
   async function saveProgress(id, p, keepalive) {
     const nb = { ...(await getBook(id)), ...p, updatedAt: Date.now(), dirty: true };
@@ -74,6 +95,22 @@ export default function App() {
       if (items.length > 1) setOrder(items); else await finishAdd(items);
     } catch (e) { if (!cancelled(e)) setMsg('Could not read that file.'); }
   }
+  async function createBook(items, fps, id, m, title) {
+    const rm = (await pullAll().catch(() => ({ meta: {} }))).meta[id];
+    let author = rm?.author ?? m.author, coverUrl = rm?.coverUrl || '';
+    if (!rm) {
+      try { const [h] = await searchBooks(`${title} ${m.author || ''}`.trim()); if (h) { author = author || h.author; coverUrl = h.coverUrl; } } catch {}
+    }
+    const b = { id, title: rm?.title || title, author, cover: m.cover, coverUrl, metaAt: rm?.metaAt || Date.now(), parts: items.map((it, i) => ({ name: it.file.name, fp: fps[i] })), part: 0, position: 0, updatedAt: 0, addedAt: Date.now() };
+    await putBook(b);
+    if (!rm) pushMeta(b).catch(() => {});
+    return b;
+  }
+  async function begin(b, items) {
+    const files = await resolve(b, items);
+    await refresh();
+    await start(b, files);
+  }
   async function finishAdd(items) {
     setOrder(null);
     try {
@@ -82,17 +119,11 @@ export default function App() {
       let b = await getBook(id);
       if (!b) {
         const m = await readMeta(items[0].file);
-        const title = m.title || cleanName(items[0].file.name);
-        let author = m.author, coverUrl = '';
-        if (!m.cover || !author) {
-          try { const [h] = await searchBooks(`${title} ${author}`.trim()); if (h) { author = author || h.author; if (!m.cover) coverUrl = h.coverUrl; } } catch {}
-        }
-        b = { id, title, author, cover: m.cover, coverUrl, parts: items.map((it, i) => ({ name: it.file.name, fp: fps[i] })), part: 0, position: 0, updatedAt: 0, addedAt: Date.now() };
-        await putBook(b);
+        const rm = (await pullAll().catch(() => ({ meta: {} }))).meta[id];
+        if (!rm && !m.title) return setNaming({ items, fps, id, m, guess: cleanName(items[0].file.name) });
+        b = await createBook(items, fps, id, m, m.title);
       }
-      const files = await resolve(b, items);
-      await refresh();
-      await start(b, files);
+      await begin(b, items);
     } catch { setMsg('Could not add that audiobook.'); }
   }
 
@@ -102,12 +133,13 @@ export default function App() {
         <Player key={cur.book.id} {...cur} onSave={(p, k) => saveProgress(cur.book.id, p, k)} onEdit={() => setEdit(cur.book)} onBack={() => { setCur(null); refresh(); }} />
       ) : (
         <main className="lib">
-          <header><h1>AURIS</h1><div><button className="ghost" onClick={() => setSetup(true)}>{device() || 'Device'}</button><button className="primary" onClick={add}>Add audiobook</button></div></header>
+          <header><h1><img className="logo" src="/logo.png" alt="AURIS" /></h1><div>{inst && <button className="ghost" onClick={() => { inst.prompt(); setInst(null); }}>Install</button>}<button className="ghost" onClick={() => setSetup(true)}>{device() || 'Device'}</button><button className="primary" onClick={add}>Add audiobook</button></div></header>
           {msg && <p className="note" onClick={() => setMsg('')}>{msg}</p>}
           {!books.length && <p className="empty">Your shelf is empty. Add an audiobook from this device. Select several files to add a book with multiple parts. Files play from where they are stored and are never uploaded.</p>}
           {books.map((b) => <Row key={b.id} b={b} onOpen={() => open(b)} onEdit={() => setEdit(b)} />)}
         </main>
       )}
+      {naming && <Naming n={naming} onCancel={() => setNaming(null)} onDone={async (t) => { const n = naming; setNaming(null); try { await begin(await createBook(n.items, n.fps, n.id, n.m, t), n.items); } catch { setMsg('Could not add that audiobook.'); } }} />}
       {order && <Order items={order} onCancel={() => setOrder(null)} onDone={finishAdd} />}
       {ask && (
         <div className="modal"><div className="sheet">
@@ -117,7 +149,7 @@ export default function App() {
         </div></div>
       )}
       {edit && <Edit b={edit} onClose={async () => { setEdit(null); await refresh(); }} />}
-      {setup && <Setup onClose={() => setSetup(false)} />}
+      {setup && <Setup onClose={() => { setSetup(false); syncMeta(); }} />}
     </div>
   );
 }
@@ -251,7 +283,9 @@ function Edit({ b, onClose }) {
   const find = async () => { setBusy(true); try { setRes(await searchBooks(title)); } catch { setRes([]); } setBusy(false); };
   const save = async () => {
     const cur = await getBook(b.id);
-    await putBook({ ...cur, title: title.trim() || cur.title, author, ...(cover ? { coverUrl: cover, cover: null } : {}) });
+    const nb = { ...cur, title: title.trim() || cur.title, author, metaAt: Date.now(), ...(cover ? { coverUrl: cover } : {}) };
+    await putBook(nb);
+    pushMeta(nb).catch(() => {});
     onClose();
   };
   return (
@@ -284,6 +318,18 @@ function Setup({ onClose }) {
       <label>Sync key<input type="password" value={k} onChange={(e) => setK(e.target.value)} /></label>
       {s && <p className="note">{s}</p>}
       <div className="actions">{!first && <button className="ghost" onClick={onClose}>Cancel</button>}<button className="primary" onClick={save}>Save</button></div>
+    </div></div>
+  );
+}
+
+function Naming({ n, onCancel, onDone }) {
+  const [t, setT] = useState(n.guess);
+  return (
+    <div className="modal"><div className="sheet">
+      <h3>What is this book called?</h3>
+      <p className="by" style={{ margin: 0 }}>The file has no title. Enter the book name and AURIS finds the author and cover online.</p>
+      <label>Book name<input autoFocus value={t} onChange={(e) => setT(e.target.value)} /></label>
+      <div className="actions"><button className="ghost" onClick={onCancel}>Cancel</button><button className="primary" disabled={!t.trim()} onClick={() => onDone(t.trim())}>Continue</button></div>
     </div></div>
   );
 }

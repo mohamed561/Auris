@@ -78,3 +78,15 @@ export async function push(item, keepalive = false) {
   const r = await fetch('/api/progress', { method: 'POST', headers: hdr(), body: JSON.stringify(item), keepalive });
   if (!r.ok) throw new Error('push ' + r.status);
 }
+
+export async function pullAll() {
+  if (!key()) return { items: {}, meta: {} };
+  const r = await fetch('/api/progress', { headers: hdr() });
+  if (!r.ok) throw new Error('pull ' + r.status);
+  const j = await r.json();
+  return { items: j.items || {}, meta: j.meta || {} };
+}
+export async function pushMeta(b) {
+  if (!key()) return;
+  await fetch('/api/progress', { method: 'POST', headers: hdr(), body: JSON.stringify({ kind: 'meta', id: b.id, title: b.title, author: b.author || '', coverUrl: b.coverUrl || '', metaAt: b.metaAt }) });
+}

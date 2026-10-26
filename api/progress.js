@@ -2,6 +2,8 @@ import { createClient } from 'redis';
 import crypto from 'node:crypto';
 
 const HASH = 'auris:progress';
+const META = 'auris:meta';
+const cover = (u) => (/^https:\/\/covers\.openlibrary\.org\//.test(u) ? String(u).slice(0, 300) : '');
 let client;
 async function db() {
   if (!client) {
@@ -24,10 +26,19 @@ export default async function handler(req, res) {
     const r = await db();
     if (req.method === 'GET') {
       const raw = await r.hGetAll(HASH);
-      return res.status(200).json({ items: Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, JSON.parse(v)])) });
+      const mraw = await r.hGetAll(META);
+      const parse = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, JSON.parse(v)]));
+      return res.status(200).json({ items: parse(raw), meta: parse(mraw) });
     }
     if (req.method === 'POST') {
       const b = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+      if (b.kind === 'meta') {
+        if (!/^[a-f0-9]{64}$/.test(b.id) || !Number.isFinite(b.metaAt)) return res.status(400).json({ error: 'bad body' });
+        const o = await r.hGet(META, b.id);
+        if (o && JSON.parse(o).metaAt >= b.metaAt) return res.status(200).json({ stale: true });
+        await r.hSet(META, b.id, JSON.stringify({ title: String(b.title || '').slice(0, 200), author: String(b.author || '').slice(0, 200), coverUrl: cover(b.coverUrl), metaAt: b.metaAt }));
+        return res.status(200).json({ ok: true });
+      }
       const ok = /^[a-f0-9]{64}$/.test(b.id) && Number.isFinite(b.position) && b.position >= 0 && Number.isFinite(b.updatedAt);
       if (!ok) return res.status(400).json({ error: 'bad body' });
       const oldRaw = await r.hGet(HASH, b.id);
