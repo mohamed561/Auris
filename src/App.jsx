@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { getAll, getBook, putBook, getHandle, putHandle, device, fmt, mime, cleanName, hashText, fingerprint, readMeta, searchBooks, pickFiles, openHandle, pull, pullAll, pushMeta, push, toItem } from './lib.js';
+import { getAll, getBook, putBook, getHandle, putHandle, device, fmt, mime, cleanName, hashText, fingerprint, readMeta, searchBooks, pickFiles, openHandle, copyLocal, readLocal, wantCopy, removeBook, pull, pullAll, pushMeta, push, toItem } from './lib.js';
 
 const useCover = (b) => {
   const u = useMemo(() => (b.cover ? URL.createObjectURL(b.cover) : ''), [b.cover]);
@@ -44,7 +44,9 @@ export default function App() {
   }, []);
 
   async function saveProgress(id, p, keepalive) {
-    const nb = { ...(await getBook(id)), ...p, updatedAt: Date.now(), dirty: true };
+    const cur0 = await getBook(id);
+    if (!cur0) return;
+    const nb = { ...cur0, ...p, updatedAt: Date.now(), dirty: true };
     await putBook(nb);
     try { await push(toItem(nb), keepalive); await putBook({ ...nb, dirty: false }); } catch {}
   }
@@ -73,18 +75,31 @@ export default function App() {
     }
     return files;
   }
+  async function keepCopies(b, files) {
+    if (!wantCopy()) return;
+    try {
+      navigator.storage.persist?.();
+      for (let i = 0; i < files.length; i++) {
+        const k = `${b.id}_${i}`;
+        if (await readLocal(k)) continue;
+        await copyLocal(files[i], k, (p) => setMsg(`Saving a copy on this device, part ${i + 1} of ${files.length}: ${Math.round(p * 100)}%`));
+      }
+      setMsg('');
+    } catch { setMsg('Could not save a copy on this device. You may need to pick the file again next time.'); }
+  }
   async function open(b) {
     try {
       let files = [];
       for (let i = 0; i < b.parts.length; i++) {
-        const h = await getHandle(`${b.id}:${i}`);
-        const f = h ? await openHandle(h) : null;
+        let f = await readLocal(`${b.id}_${i}`);
+        if (!f) { const h = await getHandle(`${b.id}:${i}`); f = h ? await openHandle(h) : null; }
         if (!f) { files = null; break; }
         files.push(f);
       }
       if (!files) {
         files = await resolve(b, await pickFiles());
         if (!files) return setMsg(`Select all ${b.parts.length} file(s) of "${b.title}".`);
+        await keepCopies(b, files);
       }
       await start(b, files);
     } catch (e) { if (!cancelled(e)) setMsg('Could not open the file.'); }
@@ -108,6 +123,7 @@ export default function App() {
   }
   async function begin(b, items) {
     const files = await resolve(b, items);
+    await keepCopies(b, files);
     await refresh();
     await start(b, files);
   }
@@ -148,7 +164,7 @@ export default function App() {
           <div className="actions"><button className="ghost" onClick={() => answer(false)}>No</button><button className="primary" onClick={() => answer(true)}>Yes</button></div>
         </div></div>
       )}
-      {edit && <Edit b={edit} onClose={async () => { setEdit(null); await refresh(); }} />}
+      {edit && <Edit b={edit} onClose={async () => { setEdit(null); await refresh(); }} onRemove={async () => { await removeBook(edit); setEdit(null); setCur(null); refresh(); }} />}
       {setup && <Setup onClose={() => { setSetup(false); syncMeta(); }} />}
     </div>
   );
@@ -229,10 +245,20 @@ function Player({ book, files, onSave, onBack, onEdit }) {
   useEffect(() => {
     if (!('mediaSession' in navigator)) return;
     const ms = navigator.mediaSession;
-    ms.metadata = new MediaMetadata({ title: book.title, artist: book.author, artwork: cover ? [{ src: cover }] : [] });
-    ms.setActionHandler('play', toggle); ms.setActionHandler('pause', toggle);
-    ms.setActionHandler('seekbackward', () => skip(-1)); ms.setActionHandler('seekforward', () => skip(1));
+    ms.metadata = new MediaMetadata({ title: book.title, artist: book.author, artwork: [{ src: cover || '/icon-512.png', sizes: '512x512' }] });
+    // Taskbar, lock screen and keyboard media keys: previous and next skip 10 seconds back and forward.
+    const h = { play: () => a.current.play(), pause: () => a.current.pause(), previoustrack: () => skip(-1), nexttrack: () => skip(1), seekbackward: () => skip(-1), seekforward: () => skip(1), seekto: (d) => seek(d.seekTime) };
+    for (const [k, fn] of Object.entries(h)) { try { ms.setActionHandler(k, fn); } catch {} }
   }, [book.title, book.author, cover]);
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+  }, [playing]);
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !dur) return;
+    try { navigator.mediaSession.setPositionState({ duration: dur, position: Math.min(t, dur), playbackRate: rate }); } catch {}
+  }, [Math.floor(t / 5), dur, rate]);
 
   const speeds = [1, 1.25, 1.5, 1.75, 2, 0.75];
   return (
@@ -278,7 +304,7 @@ function Order({ items, onDone, onCancel }) {
   );
 }
 
-function Edit({ b, onClose }) {
+function Edit({ b, onClose, onRemove }) {
   const [title, setTitle] = useState(b.title), [author, setAuthor] = useState(b.author || ''), [res, setRes] = useState([]), [busy, setBusy] = useState(false), [cover, setCover] = useState(null);
   const find = async () => { setBusy(true); try { setRes(await searchBooks(title)); } catch { setRes([]); } setBusy(false); };
   const save = async () => {
@@ -295,6 +321,7 @@ function Edit({ b, onClose }) {
       <label>Author<input value={author} onChange={(e) => setAuthor(e.target.value)} /></label>
       <button className="ghost" onClick={find} disabled={busy || !title}>{busy ? 'Searching' : 'Find cover and author online'}</button>
       {res.map((r, i) => <button key={i} className="hit" onClick={() => { setTitle(r.title); setAuthor(r.author); setCover(r.coverUrl); setRes([]); }}>{r.coverUrl && <img src={r.coverUrl} alt="" />}<span><b>{r.title}</b><i>{r.author}</i></span></button>)}
+      <button className="ghost" onClick={async () => { if (confirm('Remove this book from this device? Your listening position stays synced.')) await onRemove(); }}>Remove from this device</button>
       <div className="actions"><button className="ghost" onClick={onClose}>Cancel</button><button className="primary" onClick={save}>Save</button></div>
     </div></div>
   );

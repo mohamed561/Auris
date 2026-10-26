@@ -1,4 +1,4 @@
-import { createStore, get, set, values } from 'idb-keyval';
+import { createStore, get, set, del, values } from 'idb-keyval';
 import { parseBlob } from 'music-metadata';
 
 const bookStore = createStore('auris-books', 'books');
@@ -89,4 +89,26 @@ export async function pullAll() {
 export async function pushMeta(b) {
   if (!key()) return;
   await fetch('/api/progress', { method: 'POST', headers: hdr(), body: JSON.stringify({ kind: 'meta', id: b.id, title: b.title, author: b.author || '', coverUrl: b.coverUrl || '', metaAt: b.metaAt }) });
+}
+
+// Phones cannot remember a picked file, so on phones the file is copied once into the app's private storage.
+export const wantCopy = () => !!navigator.storage?.getDirectory && (!('showOpenFilePicker' in window) || /Android|iPhone|iPad/i.test(navigator.userAgent));
+export async function copyLocal(file, name, onProgress) {
+  const dir = await navigator.storage.getDirectory();
+  const fh = await dir.getFileHandle(name, { create: true });
+  if (!fh.createWritable) throw new Error('unsupported');
+  let n = 0;
+  const count = new TransformStream({ transform(c, ctl) { n += c.byteLength; onProgress?.(n / file.size); ctl.enqueue(c); } });
+  try { await file.stream().pipeThrough(count).pipeTo(await fh.createWritable()); }
+  catch (e) { await removeLocal(name); throw e; }
+}
+export async function readLocal(name) {
+  try { return await (await (await navigator.storage.getDirectory()).getFileHandle(name)).getFile(); } catch { return null; }
+}
+export async function removeLocal(name) {
+  try { await (await navigator.storage.getDirectory()).removeEntry(name); } catch {}
+}
+export async function removeBook(b) {
+  await del(b.id, bookStore);
+  for (let i = 0; i < b.parts.length; i++) { await removeLocal(`${b.id}_${i}`); await del(`${b.id}:${i}`, handleStore); }
 }
