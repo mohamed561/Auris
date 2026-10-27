@@ -14,6 +14,8 @@ export default function App() {
   const [setup, setSetup] = useState(!device());
   const [order, setOrder] = useState(null);
   const [msg, setMsg] = useState('');
+  const [menu, setMenu] = useState(null);
+  const [auto, setAuto] = useState(false);
   const [naming, setNaming] = useState(null);
   const [inst, setInst] = useState(null);
   useEffect(() => { const h = (e) => { e.preventDefault(); setInst(e); }; addEventListener('beforeinstallprompt', h); return () => removeEventListener('beforeinstallprompt', h); }, []);
@@ -144,36 +146,70 @@ export default function App() {
   return (
     <div className="app">
       {cur ? (
-        <Player key={cur.book.id} {...cur} onSave={(p, k) => saveProgress(cur.book.id, p, k)} onEdit={() => setEdit(cur.book)} onBack={() => { setCur(null); refresh(); }} />
+        <Player key={cur.book.id} {...cur} onSave={(p, k) => saveProgress(cur.book.id, p, k)} onBack={() => { setCur(null); refresh(); }} />
       ) : (
         <main className="lib">
-          <header><h1><img className="logo" src="/icon-192.png" alt="AURIS" /></h1><div>{inst && <button className="ghost" onClick={() => { inst.prompt(); setInst(null); }}>Install</button>}<button className="ghost" onClick={() => setSetup(true)}>{device() || 'Device'}</button><button className="primary" onClick={add}>Add audiobook</button></div></header>
+          <header><h1 className="word">AURIS</h1>{inst && <button className="txtbtn" onClick={() => { inst.prompt(); setInst(null); }}>Install</button>}<button className="txtbtn" onClick={() => setSetup(true)}>{device() || 'Device'}</button></header>
+          <h2 className="hl"><span>Your</span> <b>Library</b></h2>
           {msg && <p className="note" onClick={() => setMsg('')}>{msg}</p>}
-          {!books.length && <p className="empty">Your shelf is empty. Add an audiobook from this device. Select several files to add a book with multiple parts. Files play from where they are stored and are never uploaded.</p>}
-          {books.map((b) => <Row key={b.id} b={b} onOpen={() => open(b)} onEdit={() => setEdit(b)} />)}
+          {!books.length && <p className="empty">Your library is empty. Add an audiobook from this device. Select several files to add a book with multiple parts. Files are never uploaded.</p>}
+          <div className="grid">{books.map((b) => <Card key={b.id} b={b} onOpen={() => open(b)} onMenu={setMenu} />)}</div>
+          <button className="addbtn" onClick={add}>Add audiobook</button>
         </main>
+      )}
+      {menu && (
+        <div className="modal" onClick={() => setMenu(null)}><div className="sheet" onClick={(e) => e.stopPropagation()}>
+          <h3>{menu.title}</h3>
+          <button className="opt" onClick={() => { setAuto(false); setEdit(menu); setMenu(null); }}>Edit details</button>
+          <button className="opt" onClick={() => { setAuto(true); setEdit(menu); setMenu(null); }}>Change cover</button>
+          <button className="opt danger" onClick={async () => { if (confirm('Remove this book from this device? Your listening position stays synced.')) { await removeBook(menu); setMenu(null); refresh(); } }}>Remove from this device</button>
+        </div></div>
       )}
       {naming && <Naming n={naming} onCancel={() => setNaming(null)} onDone={async (t) => { const n = naming; setNaming(null); try { await begin(await createBook(n.items, n.fps, n.id, n.m, t), n.items); } catch { setMsg('Could not add that audiobook.'); } }} />}
       {order && <Order items={order} onCancel={() => setOrder(null)} onDone={finishAdd} />}
-      {edit && <Edit b={edit} onClose={async () => { setEdit(null); await refresh(); }} onRemove={async () => { await removeBook(edit); setEdit(null); setCur(null); refresh(); }} />}
+      {edit && <Edit b={edit} auto={auto} onClose={async () => { setEdit(null); await refresh(); }} />}
       {setup && <Setup onClose={() => { setSetup(false); syncMeta(); }} />}
     </div>
   );
 }
 
-function Row({ b, onOpen, onEdit }) {
-  const c = useCover(b);
-  const n = b.parts.length, frac = b.duration ? Math.min(1, (b.position || 0) / b.duration) : 0;
-  const pct = b.finished ? 100 : ((b.part || 0) + frac) / n * 100;
+const blobPath = (R, a, n) => {
+  const pts = [];
+  for (let i = 0; i < 120; i++) { const th = (i / 120) * 2 * Math.PI, r = R * (1 + a * Math.cos(n * th)); pts.push(`${(r * Math.sin(th)).toFixed(1)},${(-r * Math.cos(th)).toFixed(1)}`); }
+  return 'M' + pts.join('L') + 'Z';
+};
+const SHAPE = blobPath(78, 0.05, 9), ORBIT = blobPath(94, 0.04, 9);
+
+// Scalloped cover. With p (0 to 1) a dot travels along an outline to show progress.
+function Blob({ id, src, letter, p, tight }) {
+  const ref = useRef();
+  const [pt, setPt] = useState([0, -94]);
+  useEffect(() => {
+    if (p == null || !ref.current) return;
+    const el = ref.current, q = el.getPointAtLength(el.getTotalLength() * Math.min(1, Math.max(0, p)));
+    setPt([q.x, q.y]);
+  }, [p]);
   return (
-    <div className="row">
-      <button className="rowmain" onClick={onOpen}>
-        <span className="cv" style={c ? { backgroundImage: `url(${c})` } : null}>{!c && b.title[0]}</span>
-        <span className="meta"><b>{b.title}</b><i>{b.author || 'Unknown author'}</i>
-          <span className="bar"><span style={{ width: pct + '%' }} /></span>
-          <small>{b.finished ? 'Finished' : !b.updatedAt ? (n > 1 ? `${n} parts` : 'Not started') : n > 1 ? `Part ${(b.part || 0) + 1} of ${n}, at ${fmt(b.position)}` : `${fmt((b.duration || 0) - b.position)} left`}</small></span>
-      </button>
-      <button className="ghost" onClick={onEdit}>Edit</button>
+    <svg viewBox={tight ? '-84 -84 168 168' : '-100 -100 200 200'} className="blob" aria-hidden="true">
+      <defs><clipPath id={id}><path d={SHAPE} /></clipPath></defs>
+      <path d={SHAPE} className="bfill" />
+      {src ? <image href={src} x="-78" y="-78" width="156" height="156" preserveAspectRatio="xMidYMid slice" clipPath={`url(#${id})`} /> : <text y="20">{letter}</text>}
+      {p != null && <><path ref={ref} d={ORBIT} className="orbit" /><circle cx={pt[0]} cy={pt[1]} r="3.6" className="dot" /></>}
+    </svg>
+  );
+}
+
+function Card({ b, onOpen, onMenu }) {
+  const c = useCover(b), timer = useRef(0), fired = useRef(false);
+  const n = b.parts.length;
+  const stop = () => clearTimeout(timer.current);
+  const info = b.finished ? 'Finished' : !b.updatedAt ? (n > 1 ? `${n} parts` : 'New') : n > 1 ? `Part ${(b.part || 0) + 1} of ${n}` : `${fmt((b.duration || 0) - b.position)} left`;
+  return (
+    <div className="card" onPointerDown={() => { fired.current = false; timer.current = setTimeout(() => { fired.current = true; onMenu(b); }, 550); }} onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop}
+      onContextMenu={(e) => { e.preventDefault(); fired.current = true; onMenu(b); }} onClick={() => { if (!fired.current) onOpen(); }}>
+      <Blob id={'c' + b.id.slice(0, 10)} src={c} letter={b.title[0]} tight />
+      <button className="dots" aria-label={`Options for ${b.title}`} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onMenu(b); }}><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" /></svg></button>
+      <b>{b.title}</b><small>{b.author || info}</small>{b.author && <small>{info}</small>}
     </div>
   );
 }
@@ -183,10 +219,6 @@ function Player({ book, files, onSave, onBack, onEdit }) {
   const cover = useCover(book);
   const [t, setT] = useState(0), [dur, setDur] = useState(0), [playing, setPlaying] = useState(false), [rate, setRate] = useState(1), [badge, setBadge] = useState(''), [part, setPart] = useState(0);
   const tap = useRef({ n: 0, dir: 0, timer: 0 });
-  const [dim, setDim] = useState(false);
-  const enterDim = () => { setDim(true); document.documentElement.requestFullscreen?.().catch(() => {}); };
-  const leaveDim = () => { setDim(false); if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {}); };
-  useEffect(() => { const f = () => !document.fullscreenElement && setDim(false); document.addEventListener('fullscreenchange', f); return () => document.removeEventListener('fullscreenchange', f); }, []);
 
   const load = (i, at = 0, play = false) => {
     const el = a.current;
@@ -259,9 +291,14 @@ function Player({ book, files, onSave, onBack, onEdit }) {
   return (
     <section className="player">
       <audio ref={a} onTimeUpdate={(e) => setT(e.target.currentTime)} onPlay={() => { started.current = true; setPlaying(true); }} onPause={() => { setPlaying(false); save(false); }} onEnded={ended} />
-      <div className="top"><button className="ghost" onClick={onBack}>Library</button><span><button className="ghost" onClick={enterDim}>Dim</button><button className="ghost" onClick={onEdit}>Edit</button></span></div>
-      <div className="art" style={cover ? { backgroundImage: `url(${cover})` } : null}>{!cover && book.title[0]}{badge && <span className="badge">{badge}</span>}</div>
-      <h2>{book.title}</h2><p className="by">{book.author}</p>
+      <div className="top">
+        <button className="circ" onClick={onBack} aria-label="Back to library"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg></button>
+        <span>Now listening</span>
+        <button className="circ" aria-label="Playback speed" onClick={() => { const r = speeds[speeds.indexOf(rate) + 1] || 1; setRate(r); a.current.playbackRate = r; }}>{rate}x</button>
+      </div>
+      <p className="clock"><b>{fmt(t)}</b> | {fmt(dur)}</p>
+      <div className="art"><Blob id="pl" src={cover} letter={book.title[0]} p={dur ? t / dur : 0} />{badge && <span className="badge">{badge}</span>}</div>
+      <h2 className="bt">{book.title}</h2><p className="by">{book.author}</p>
       {files.length > 1 && (
         <div className="partnav">
           <button className="ghost" disabled={part === 0} onClick={() => load(part - 1, 0, playing)}>Previous part</button>
@@ -269,16 +306,12 @@ function Player({ book, files, onSave, onBack, onEdit }) {
           <button className="ghost" disabled={part === files.length - 1} onClick={() => load(part + 1, 0, playing)}>Next part</button>
         </div>
       )}
-      <input className="seek" type="range" min="0" max={dur || 0} step="1" value={t} style={{ '--p': dur ? (t / dur) * 100 + '%' : '0%' }} onChange={(e) => seek(+e.target.value)} />
-      <div className="times"><span>{fmt(t)}</span><span>-{fmt(dur - t)}</span></div>
+      <input className="seek" type="range" min="0" max={dur || 0} step="1" value={t} aria-label="Seek" style={{ '--p': dur ? (t / dur) * 100 + '%' : '0%' }} onChange={(e) => seek(+e.target.value)} />
       <div className="ctl">
-        <button className="ghost speed" onClick={() => { const r = speeds[speeds.indexOf(rate) + 1] || 1; setRate(r); a.current.playbackRate = r; }}>{rate}x</button>
-        <button className="skip" aria-label="Back 10 seconds" onClick={() => skip(-1)}>-10</button>
+        <button className="sk" aria-label="Back 10 seconds" onClick={() => skip(-1)}><svg viewBox="0 0 24 24"><path d="M17 5v14L6 12z" /></svg><small>10</small></button>
         <button className="play" aria-label={playing ? 'Pause' : 'Play'} onClick={toggle}>{playing ? <svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z" /></svg> : <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>}</button>
-        <button className="skip" aria-label="Forward 10 seconds" onClick={() => skip(1)}>+10</button>
-        <span className="speed" />
+        <button className="sk" aria-label="Forward 10 seconds" onClick={() => skip(1)}><svg viewBox="0 0 24 24"><path d="M7 5v14l11-7z" /></svg><small>10</small></button>
       </div>
-      {dim && <div className="dim" onClick={leaveDim}><h2>{book.title}</h2></div>}
     </section>
   );
 }
@@ -300,9 +333,10 @@ function Order({ items, onDone, onCancel }) {
   );
 }
 
-function Edit({ b, onClose, onRemove }) {
+function Edit({ b, onClose, auto }) {
   const [title, setTitle] = useState(b.title), [author, setAuthor] = useState(b.author || ''), [res, setRes] = useState([]), [busy, setBusy] = useState(false), [cover, setCover] = useState(null);
   const find = async () => { setBusy(true); try { setRes(await searchBooks(title)); } catch { setRes([]); } setBusy(false); };
+  useEffect(() => { if (auto) find(); }, []);
   const save = async () => {
     const cur = await getBook(b.id);
     const nb = { ...cur, title: title.trim() || cur.title, author, metaAt: Date.now(), ...(cover ? { coverUrl: cover } : {}) };
@@ -317,7 +351,6 @@ function Edit({ b, onClose, onRemove }) {
       <label>Author<input value={author} onChange={(e) => setAuthor(e.target.value)} /></label>
       <button className="ghost" onClick={find} disabled={busy || !title}>{busy ? 'Searching' : 'Find cover and author online'}</button>
       {res.map((r, i) => <button key={i} className="hit" onClick={() => { setTitle(r.title); setAuthor(r.author); setCover(r.coverUrl); setRes([]); }}>{r.coverUrl && <img src={r.coverUrl} alt="" />}<span><b>{r.title}</b><i>{r.author}</i></span></button>)}
-      <button className="ghost" onClick={async () => { if (confirm('Remove this book from this device? Your listening position stays synced.')) await onRemove(); }}>Remove from this device</button>
       <div className="actions"><button className="ghost" onClick={onClose}>Cancel</button><button className="primary" onClick={save}>Save</button></div>
     </div></div>
   );
@@ -327,6 +360,7 @@ function Setup({ onClose }) {
   const first = !device();
   const [name, setName] = useState(device() || (/Android|iPhone|iPad/i.test(navigator.userAgent) ? 'Phone' : 'PC'));
   const [k, setK] = useState(localStorage.getItem('syncKey') || ''), [s, setS] = useState('');
+  const skip = () => { if (first) localStorage.setItem('deviceName', name.trim() || 'Device'); onClose(); };
   const save = async () => {
     localStorage.setItem('deviceName', name.trim() || 'Device');
     localStorage.setItem('syncKey', k.trim());
@@ -334,26 +368,15 @@ function Setup({ onClose }) {
     try { await pull(); onClose(); } catch { setS('Could not connect. Check the key and that the server is set up.'); }
   };
   return (
-    <div className="modal"><div className="sheet">
-      <h3>{first ? 'Set up this device' : 'Device and sync'}</h3>
-      <p className="by" style={{ margin: 0 }}>The device name is shown on your other devices, for example PC VALAR. Enter the same sync key (the SYNC_KEY from Vercel) on every device. Everything else syncs automatically.</p>
+    <div className="page"><div className="pagein">
+      <div className="ptop"><span className="word">AURIS</span><button className="txtbtn" onClick={skip}>{first ? 'Skip' : 'Close'}</button></div>
+      <div className="deco"><Blob id="s1" src="/icon-192.png" tight /><Blob id="s2" letter="a" tight /></div>
+      <h2 className="hl"><span>Listen Anywhere,</span><br /><b>Resume Everywhere</b></h2>
+      <p className="by">Name this device and enter your sync key. Your place in every book then follows you from PC to phone.</p>
       <label>Device name<input value={name} onChange={(e) => setName(e.target.value)} /></label>
       <label>Sync key<input type="password" value={k} onChange={(e) => setK(e.target.value)} /></label>
       {s && <p className="note">{s}</p>}
-      <div className="actions">{!first && <button className="ghost" onClick={onClose}>Cancel</button>}<button className="primary" onClick={save}>Save</button></div>
+      <button className="addbtn static" onClick={save}>Save</button>
     </div></div>
   );
 }
-
-function Naming({ n, onCancel, onDone }) {
-  const [t, setT] = useState(n.guess);
-  return (
-    <div className="modal"><div className="sheet">
-      <h3>What is this book called?</h3>
-      <p className="by" style={{ margin: 0 }}>The file has no title. Enter the book name and AURIS finds the author and cover online.</p>
-      <label>Book name<input autoFocus value={t} onChange={(e) => setT(e.target.value)} /></label>
-      <div className="actions"><button className="ghost" onClick={onCancel}>Cancel</button><button className="primary" disabled={!t.trim()} onClick={() => onDone(t.trim())}>Continue</button></div>
-    </div></div>
-  );
-}
-
