@@ -13,25 +13,28 @@ export default function App() {
   const [edit, setEdit] = useState(null);
   const [setup, setSetup] = useState(!device());
   const [order, setOrder] = useState(null);
-  const [ask, setAsk] = useState(null);
   const [msg, setMsg] = useState('');
   const [naming, setNaming] = useState(null);
   const [inst, setInst] = useState(null);
   useEffect(() => { const h = (e) => { e.preventDefault(); setInst(e); }; addEventListener('beforeinstallprompt', h); return () => removeEventListener('beforeinstallprompt', h); }, []);
 
-  const refresh = async () => setBooks((await getAll()).sort((a, b) => (b.updatedAt || b.addedAt) - (a.updatedAt || a.addedAt)));
+  const refresh = async () => setBooks((await getAll()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0) || b.addedAt - a.addedAt));
   const flush = async () => {
     for (const b of await getAll()) if (b.dirty) push(toItem(b)).then(async () => putBook({ ...(await getBook(b.id)), dirty: false })).catch(() => {});
   };
   // Titles, authors and covers follow the book to every device; the newest edit wins.
   const syncMeta = async () => {
     try {
-      const { meta } = await pullAll();
+      const { meta, items } = await pullAll();
       let changed = false;
       for (const b of await getAll()) {
         const m = meta[b.id], t = b.metaAt || b.addedAt || 0;
         if (m && m.metaAt > t) { await putBook({ ...b, title: m.title, author: m.author, coverUrl: m.coverUrl, metaAt: m.metaAt }); changed = true; }
         else if (t > (m?.metaAt || 0)) pushMeta({ ...b, metaAt: t }).catch(() => {});
+      }
+      for (const b of await getAll()) {
+        const r = items[b.id];
+        if (r && r.device !== device() && r.updatedAt > (b.updatedAt || 0)) { await putBook({ ...b, part: r.part || 0, position: r.position, finished: r.finished, updatedAt: r.updatedAt }); changed = true; }
       }
       if (changed) refresh();
     } catch {}
@@ -50,19 +53,14 @@ export default function App() {
     await putBook(nb);
     try { await push(toItem(nb), keepalive); await putBook({ ...nb, dirty: false }); } catch {}
   }
-  // Opening a book last played on another device asks whether to jump to that point.
+  // Opening a book last played on another device jumps there automatically (the player starts 10 seconds earlier).
   async function start(b, files) {
     const remote = (await pull().catch(() => ({})))[b.id];
-    if (remote && remote.device !== device() && remote.updatedAt > (b.updatedAt || 0) && remote.updatedAt > (b.seenRemote || 0)) return setAsk({ b, files, remote });
+    if (remote && remote.device !== device() && remote.updatedAt > (b.updatedAt || 0)) {
+      b = { ...b, part: remote.part || 0, position: remote.position, finished: remote.finished, updatedAt: remote.updatedAt };
+      await putBook(b);
+    }
     setCur({ book: b, files });
-  }
-  async function answer(yes) {
-    const { b, files, remote } = ask;
-    setAsk(null);
-    let nb = { ...b, seenRemote: remote.updatedAt };
-    if (yes) nb = { ...nb, part: remote.part || 0, position: remote.position, finished: remote.finished, updatedAt: remote.updatedAt };
-    await putBook(nb);
-    setCur({ book: nb, files });
   }
   async function resolve(b, items) {
     const fps = await Promise.all(items.map((i) => fingerprint(i.file)));
@@ -149,7 +147,7 @@ export default function App() {
         <Player key={cur.book.id} {...cur} onSave={(p, k) => saveProgress(cur.book.id, p, k)} onEdit={() => setEdit(cur.book)} onBack={() => { setCur(null); refresh(); }} />
       ) : (
         <main className="lib">
-          <header><h1><img className="logo" src="/logo.png" alt="AURIS" /></h1><div>{inst && <button className="ghost" onClick={() => { inst.prompt(); setInst(null); }}>Install</button>}<button className="ghost" onClick={() => setSetup(true)}>{device() || 'Device'}</button><button className="primary" onClick={add}>Add audiobook</button></div></header>
+          <header><h1><img className="logo" src="/icon-192.png" alt="AURIS" /></h1><div>{inst && <button className="ghost" onClick={() => { inst.prompt(); setInst(null); }}>Install</button>}<button className="ghost" onClick={() => setSetup(true)}>{device() || 'Device'}</button><button className="primary" onClick={add}>Add audiobook</button></div></header>
           {msg && <p className="note" onClick={() => setMsg('')}>{msg}</p>}
           {!books.length && <p className="empty">Your shelf is empty. Add an audiobook from this device. Select several files to add a book with multiple parts. Files play from where they are stored and are never uploaded.</p>}
           {books.map((b) => <Row key={b.id} b={b} onOpen={() => open(b)} onEdit={() => setEdit(b)} />)}
@@ -157,13 +155,6 @@ export default function App() {
       )}
       {naming && <Naming n={naming} onCancel={() => setNaming(null)} onDone={async (t) => { const n = naming; setNaming(null); try { await begin(await createBook(n.items, n.fps, n.id, n.m, t), n.items); } catch { setMsg('Could not add that audiobook.'); } }} />}
       {order && <Order items={order} onCancel={() => setOrder(null)} onDone={finishAdd} />}
-      {ask && (
-        <div className="modal"><div className="sheet">
-          <h3>Continue from another device?</h3>
-          <p className="by" style={{ margin: 0 }}>"{ask.b.title}" was last played on {ask.remote.device || 'another device'} at {fmt(ask.remote.position)}{ask.b.parts.length > 1 ? ` in part ${(ask.remote.part || 0) + 1}` : ''}. Yes resumes from there, 10 seconds earlier. No keeps this device where it is.</p>
-          <div className="actions"><button className="ghost" onClick={() => answer(false)}>No</button><button className="primary" onClick={() => answer(true)}>Yes</button></div>
-        </div></div>
-      )}
       {edit && <Edit b={edit} onClose={async () => { setEdit(null); await refresh(); }} onRemove={async () => { await removeBook(edit); setEdit(null); setCur(null); refresh(); }} />}
       {setup && <Setup onClose={() => { setSetup(false); syncMeta(); }} />}
     </div>
@@ -192,6 +183,10 @@ function Player({ book, files, onSave, onBack, onEdit }) {
   const cover = useCover(book);
   const [t, setT] = useState(0), [dur, setDur] = useState(0), [playing, setPlaying] = useState(false), [rate, setRate] = useState(1), [badge, setBadge] = useState(''), [part, setPart] = useState(0);
   const tap = useRef({ n: 0, dir: 0, timer: 0 });
+  const [dim, setDim] = useState(false);
+  const enterDim = () => { setDim(true); document.documentElement.requestFullscreen?.().catch(() => {}); };
+  const leaveDim = () => { setDim(false); if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {}); };
+  useEffect(() => { const f = () => !document.fullscreenElement && setDim(false); document.addEventListener('fullscreenchange', f); return () => document.removeEventListener('fullscreenchange', f); }, []);
 
   const load = (i, at = 0, play = false) => {
     const el = a.current;
@@ -264,7 +259,7 @@ function Player({ book, files, onSave, onBack, onEdit }) {
   return (
     <section className="player">
       <audio ref={a} onTimeUpdate={(e) => setT(e.target.currentTime)} onPlay={() => { started.current = true; setPlaying(true); }} onPause={() => { setPlaying(false); save(false); }} onEnded={ended} />
-      <div className="top"><button className="ghost" onClick={onBack}>Library</button><button className="ghost" onClick={onEdit}>Edit</button></div>
+      <div className="top"><button className="ghost" onClick={onBack}>Library</button><span><button className="ghost" onClick={enterDim}>Dim</button><button className="ghost" onClick={onEdit}>Edit</button></span></div>
       <div className="art" style={cover ? { backgroundImage: `url(${cover})` } : null}>{!cover && book.title[0]}{badge && <span className="badge">{badge}</span>}</div>
       <h2>{book.title}</h2><p className="by">{book.author}</p>
       {files.length > 1 && (
@@ -283,6 +278,7 @@ function Player({ book, files, onSave, onBack, onEdit }) {
         <button className="skip" aria-label="Forward 10 seconds" onClick={() => skip(1)}>+10</button>
         <span className="speed" />
       </div>
+      {dim && <div className="dim" onClick={leaveDim}><h2>{book.title}</h2></div>}
     </section>
   );
 }
@@ -360,3 +356,4 @@ function Naming({ n, onCancel, onDone }) {
     </div></div>
   );
 }
+

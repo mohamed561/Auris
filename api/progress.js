@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 
 const HASH = 'auris:progress';
 const META = 'auris:meta';
-const cover = (u) => (/^https:\/\/covers\.openlibrary\.org\//.test(u) ? String(u).slice(0, 300) : '');
+const cover = (u) => (/^https:\/\/(covers\.openlibrary\.org|([a-z0-9-]+\.)*hardcover\.app|books\.google\.com|books\.googleusercontent\.com)\//.test(u) ? String(u).slice(0, 400) : '');
 let client;
 async function db() {
   if (!client) {

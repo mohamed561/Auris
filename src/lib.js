@@ -38,6 +38,12 @@ export async function readMeta(file) {
   } catch { return { title: '', author: '', cover: null }; }
 }
 export async function searchBooks(q) {
+  try {
+    if (key()) {
+      const r = await fetch('/api/book?q=' + encodeURIComponent(q), { headers: hdr() });
+      if (r.ok) { const j = await r.json(); if (j.results?.length) return j.results; }
+    }
+  } catch {}
   const r = await fetch(`https://openlibrary.org/search.json?limit=6&fields=title,author_name,cover_i&q=${encodeURIComponent(q)}`);
   const j = await r.json();
   return (j.docs || []).map((d) => ({ title: d.title, author: (d.author_name || [])[0] || '', coverUrl: d.cover_i ? `https://covers.openlibrary.org/b/id/${d.cover_i}-L.jpg` : '' }));
