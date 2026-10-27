@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "com.auris.player",
+        "sha256_cert_fingerprints": ["11:5A:C1:87:1E:78:82:36:CA:80:DB:F9:EE:F8:E6:67:D4:C6:5C:18:01:54:2D:49:75:5C:A8:DF:EF:6D:DC:72"]
+      }
+    }]
