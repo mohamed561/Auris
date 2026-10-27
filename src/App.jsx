@@ -279,6 +279,10 @@ function Player({ book, files, mini, onSave, onBack, onExpand, onClose }) {
   const [chs, setChs] = useState(book.chapters || []), [marks, setMarks] = useState(book.marks || []), [note, setNote] = useState('');
   const sleepRef = useRef(null), ac = useRef(null), gain = useRef(null);
   sleepRef.current = sleep;
+  const [fs, setFs] = useState(false);
+  const enterFs = () => { setFs(true); document.documentElement.requestFullscreen?.().catch(() => {}); };
+  const leaveFs = () => { setFs(false); if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {}); };
+  useEffect(() => { const f = () => { if (!document.fullscreenElement) setFs(false); }; document.addEventListener('fullscreenchange', f); return () => document.removeEventListener('fullscreenchange', f); }, []);
   const sec = (c) => (c.start > dur * 2 ? c.start / 1000 : c.start);
   const chap = files.length === 1 && chs.length ? chs.filter((c) => sec(c) <= t + 0.5).pop() : null;
   const patchBook = async (p) => { const c = await getBook(book.id); if (c) await putBook({ ...c, ...p }); };
@@ -409,7 +413,21 @@ function Player({ book, files, mini, onSave, onBack, onExpand, onClose }) {
         {files.length === 1 && chs.length > 0 && <button className="tool" onClick={() => setSheet('chapters')}>Chapters</button>}
         <button className="tool" onClick={() => setSheet('marks')}>Bookmarks</button>
         <button className={boosted ? 'tool on' : 'tool'} aria-pressed={boosted} onClick={boost}>Boost</button>
+        <button className="tool" onClick={enterFs}>Full screen</button>
       </div>
+      {fs && (
+        <div className="fs">
+          <button className="circ fsx" onClick={leaveFs} aria-label="Exit full screen"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+          <div className="fsart"><Scallop id="fs" src={cover} letter={book.title[0]} p={dur ? t / dur : 0} onSeek={(f) => dur && seek(f * dur)} />{badge && <span className="badge">{badge}</span>}</div>
+          <p className="fstime"><b>{fmt(t)}</b> | {fmt(dur)}</p>
+          <h2 className="bt">{book.title}</h2>
+          <div className="ctl">
+            <button className="sk" aria-label="Back 10 seconds" onClick={() => skip(-1)}><svg viewBox="0 0 24 24"><path d="M17 5v14L6 12z" /></svg><small>10</small></button>
+            <button className="play" aria-label={playing ? 'Pause' : 'Play'} onClick={toggle}>{playing ? <svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z" /></svg> : <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>}</button>
+            <button className="sk" aria-label="Forward 10 seconds" onClick={() => skip(1)}><svg viewBox="0 0 24 24"><path d="M7 5v14l11-7z" /></svg><small>10</small></button>
+          </div>
+        </div>
+      )}
       {sheet && (
         <div className="modal" onClick={() => setSheet(null)}><div className="sheet" onClick={(e) => e.stopPropagation()}>
           {sheet === 'sleep' && <>
