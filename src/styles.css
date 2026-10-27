@@ -65,3 +65,12 @@ input:not([type=range]){background:var(--card);border:1px solid var(--line);colo
 .mbtn{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;flex:none}.mbtn svg{width:20px;fill:var(--ink)}.mbtn.main{background:var(--ink)}.mbtn.main svg{fill:var(--bg)}
 .mbtn .x{fill:none;stroke:var(--ink);stroke-width:2;stroke-linecap:round}
 .addbtn.lifted{bottom:calc(86px + env(safe-area-inset-bottom))}.grid.lifted{padding-bottom:200px}
+
+.bar2{display:flex;gap:8px;align-items:center;margin-bottom:18px}.search{flex:1;border-radius:999px!important;padding:10px 16px!important}
+.card.ghost{opacity:.45}
+.tools{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:22px}.tool{padding:8px 14px;border-radius:999px;border:1px solid var(--line);font-size:13px;color:var(--mu)}.tool.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.chap{margin-top:-10px}.opt small{color:var(--mu);margin-left:8px}
+.cat{border-top:1px solid var(--line)}.cathead{width:100%;display:flex;justify-content:space-between;align-items:center;padding:16px 2px;font-weight:600}
+.cathead svg{width:18px;fill:none;stroke:var(--ink);stroke-width:2;stroke-linecap:round;transition:transform .2s}.cathead[aria-expanded=true] svg{transform:rotate(180deg)}
+.catbody{display:flex;flex-direction:column;gap:10px;padding-bottom:16px}
+.rowi{display:flex;align-items:center;gap:8px;background:var(--card);border-radius:12px;padding:10px 12px}.rowi div{flex:1;min-width:0;text-align:left}.rowi small{color:var(--mu);display:block}.rowi button b{display:block}

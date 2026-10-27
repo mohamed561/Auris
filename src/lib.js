@@ -17,7 +17,7 @@ export const fmt = (s) => {
 };
 export const mime = (f) => {
   const e = f.name.split('.').pop().toLowerCase();
-  return { m4b: 'audio/mp4', m4a: 'audio/mp4', mp3: 'audio/mpeg', aac: 'audio/aac', ogg: 'audio/ogg', opus: 'audio/ogg', flac: 'audio/flac', wav: 'audio/wav' }[e] || f.type || 'audio/mpeg';
+  return { m4b: 'audio/mp4', m4a: 'audio/mp4', mp3: 'audio/mpeg', aac: 'audio/aac', ogg: 'audio/ogg', opus: 'audio/ogg', flac: 'audio/flac', wav: 'audio/wav', oga: 'audio/ogg', mp4: 'audio/mp4', weba: 'audio/webm', webm: 'audio/webm', aif: 'audio/aiff', aiff: 'audio/aiff' }[e] || f.type || 'audio/mpeg';
 };
 export const cleanName = (n) => n.replace(/\.[^.]+$/, '').replace(/[_.]+/g, ' ').replace(/[\s-]*(part|pt|cd|disc|disk)?[\s-]*\d+$/i, '').trim() || n;
 
@@ -32,10 +32,10 @@ export async function fingerprint(file) {
 
 export async function readMeta(file) {
   try {
-    const c = (await parseBlob(file)).common;
+    const m = await parseBlob(file), c = m.common;
     const pic = c.picture?.[0];
-    return { title: c.album || c.title || '', author: c.artist || c.albumartist || '', cover: pic ? new Blob([pic.data], { type: pic.format }) : null };
-  } catch { return { title: '', author: '', cover: null }; }
+    return { title: c.album || c.title || '', author: c.artist || c.albumartist || '', cover: pic ? new Blob([pic.data], { type: pic.format }) : null, chapters: (m.format.chapters || []).map((x) => ({ title: x.title, start: x.start })) };
+  } catch { return { title: '', author: '', cover: null, chapters: [] }; }
 }
 export async function searchBooks(q) {
   try {
@@ -52,12 +52,12 @@ export async function searchBooks(q) {
 // Files are never uploaded. Desktop Chrome/Edge can remember them; phones re-pick them.
 export async function pickFiles() {
   if ('showOpenFilePicker' in window) {
-    const hs = await window.showOpenFilePicker({ multiple: true, types: [{ description: 'Audiobooks', accept: { 'audio/*': ['.mp3', '.m4b', '.m4a', '.aac', '.ogg', '.opus', '.flac', '.wav'] } }] });
+    const hs = await window.showOpenFilePicker({ multiple: true, types: [{ description: 'Audiobooks', accept: { 'audio/*': ['.mp3', '.m4b', '.m4a', '.mp4', '.aac', '.ogg', '.oga', '.opus', '.flac', '.wav', '.weba', '.webm', '.aif', '.aiff'] } }] });
     return Promise.all(hs.map(async (handle) => ({ file: await handle.getFile(), handle })));
   }
   return new Promise((res, rej) => {
     const i = document.createElement('input');
-    i.type = 'file'; i.multiple = true; i.accept = 'audio/*,.m4b';
+    i.type = 'file'; i.multiple = true; i.accept = 'audio/*,.m4b,.m4a,.mp4,.oga,.opus,.aif,.aiff';
     i.onchange = () => (i.files.length ? res([...i.files].map((file) => ({ file }))) : rej(new Error('none')));
     i.click();
   });
