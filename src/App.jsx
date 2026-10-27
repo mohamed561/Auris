@@ -181,7 +181,7 @@ const blobPath = (R, a, n) => {
 const SHAPE = blobPath(78, 0.05, 9), ORBIT = blobPath(94, 0.04, 9);
 
 // Scalloped cover. With p (0 to 1) a dot travels along an outline to show progress.
-function Blob({ id, src, letter, p, tight }) {
+function Scallop({ id, src, letter, p, tight }) {
   const ref = useRef();
   const [pt, setPt] = useState([0, -94]);
   useEffect(() => {
@@ -207,7 +207,7 @@ function Card({ b, onOpen, onMenu }) {
   return (
     <div className="card" onPointerDown={() => { fired.current = false; timer.current = setTimeout(() => { fired.current = true; onMenu(b); }, 550); }} onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop}
       onContextMenu={(e) => { e.preventDefault(); fired.current = true; onMenu(b); }} onClick={() => { if (!fired.current) onOpen(); }}>
-      <Blob id={'c' + b.id.slice(0, 10)} src={c} letter={b.title[0]} tight />
+      <Scallop id={'c' + b.id.slice(0, 10)} src={c} letter={b.title[0]} tight />
       <button className="dots" aria-label={`Options for ${b.title}`} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onMenu(b); }}><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" /></svg></button>
       <b>{b.title}</b><small>{b.author || info}</small>{b.author && <small>{info}</small>}
     </div>
@@ -297,7 +297,7 @@ function Player({ book, files, onSave, onBack, onEdit }) {
         <button className="circ" aria-label="Playback speed" onClick={() => { const r = speeds[speeds.indexOf(rate) + 1] || 1; setRate(r); a.current.playbackRate = r; }}>{rate}x</button>
       </div>
       <p className="clock"><b>{fmt(t)}</b> | {fmt(dur)}</p>
-      <div className="art"><Blob id="pl" src={cover} letter={book.title[0]} p={dur ? t / dur : 0} />{badge && <span className="badge">{badge}</span>}</div>
+      <div className="art"><Scallop id="pl" src={cover} letter={book.title[0]} p={dur ? t / dur : 0} />{badge && <span className="badge">{badge}</span>}</div>
       <h2 className="bt">{book.title}</h2><p className="by">{book.author}</p>
       {files.length > 1 && (
         <div className="partnav">
@@ -370,7 +370,7 @@ function Setup({ onClose }) {
   return (
     <div className="page"><div className="pagein">
       <div className="ptop"><span className="word">AURIS</span><button className="txtbtn" onClick={skip}>{first ? 'Skip' : 'Close'}</button></div>
-      <div className="deco"><Blob id="s1" src="/icon-192.png" tight /><Blob id="s2" letter="a" tight /></div>
+      <div className="deco"><Scallop id="s1" src="/icon-192.png" tight /><Scallop id="s2" letter="a" tight /></div>
       <h2 className="hl"><span>Listen Anywhere,</span><br /><b>Resume Everywhere</b></h2>
       <p className="by">Name this device and enter your sync key. Your place in every book then follows you from PC to phone.</p>
       <label>Device name<input value={name} onChange={(e) => setName(e.target.value)} /></label>
