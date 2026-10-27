@@ -16,6 +16,12 @@ export default function App() {
   const [msg, setMsg] = useState('');
   const [menu, setMenu] = useState(null);
   const [auto, setAuto] = useState(false);
+  const [theme, setTheme] = useState(document.documentElement.dataset.theme || 'light');
+  const toggleTheme = () => {
+    const t = theme === 'dark' ? 'light' : 'dark';
+    setTheme(t); document.documentElement.dataset.theme = t; localStorage.setItem('theme', t);
+    document.querySelector('meta[name=theme-color]')?.setAttribute('content', t === 'dark' ? '#2C2C2C' : '#DCDBD5');
+  };
   const [naming, setNaming] = useState(null);
   const [inst, setInst] = useState(null);
   useEffect(() => { const h = (e) => { e.preventDefault(); setInst(e); }; addEventListener('beforeinstallprompt', h); return () => removeEventListener('beforeinstallprompt', h); }, []);
@@ -149,7 +155,7 @@ export default function App() {
         <Player key={cur.book.id} {...cur} onSave={(p, k) => saveProgress(cur.book.id, p, k)} onBack={() => { setCur(null); refresh(); }} />
       ) : (
         <main className="lib">
-          <header><h1 className="word">AURIS</h1>{inst && <button className="txtbtn" onClick={() => { inst.prompt(); setInst(null); }}>Install</button>}<button className="txtbtn" onClick={() => setSetup(true)}>{device() || 'Device'}</button></header>
+          <header><h1 className="word">AURIS</h1>{inst && <button className="txtbtn" onClick={() => { inst.prompt(); setInst(null); }}>Install</button>}<button className="txtbtn" onClick={toggleTheme}>{theme === 'dark' ? 'Light' : 'Dark'}</button><button className="txtbtn" onClick={() => setSetup(true)}>{device() || 'Device'}</button></header>
           <h2 className="hl"><span>Your</span> <b>Library</b></h2>
           {msg && <p className="note" onClick={() => setMsg('')}>{msg}</p>}
           {!books.length && <p className="empty">Your library is empty. Add an audiobook from this device. Select several files to add a book with multiple parts. Files are never uploaded.</p>}
