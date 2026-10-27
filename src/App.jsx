@@ -16,6 +16,7 @@ export default function App() {
   const [msg, setMsg] = useState('');
   const [menu, setMenu] = useState(null);
   const [auto, setAuto] = useState(false);
+  const [full, setFull] = useState(true);
   const [theme, setTheme] = useState(document.documentElement.dataset.theme || 'light');
   const toggleTheme = () => {
     const t = theme === 'dark' ? 'light' : 'dark';
@@ -59,6 +60,7 @@ export default function App() {
     if (!cur0) return;
     const nb = { ...cur0, ...p, updatedAt: Date.now(), dirty: true };
     await putBook(nb);
+    refresh();
     try { await push(toItem(nb), keepalive); await putBook({ ...nb, dirty: false }); } catch {}
   }
   // Opening a book last played on another device jumps there automatically (the player starts 10 seconds earlier).
@@ -69,6 +71,7 @@ export default function App() {
       await putBook(b);
     }
     setCur({ book: b, files });
+    setFull(true);
   }
   async function resolve(b, items) {
     const fps = await Promise.all(items.map((i) => fingerprint(i.file)));
@@ -94,6 +97,7 @@ export default function App() {
     } catch { setMsg('Could not save a copy on this device. You may need to pick the file again next time.'); }
   }
   async function open(b) {
+    if (cur?.book.id === b.id) return setFull(true);
     try {
       let files = [];
       for (let i = 0; i < b.parts.length; i++) {
@@ -131,6 +135,7 @@ export default function App() {
     const files = await resolve(b, items);
     await keepCopies(b, files);
     await refresh();
+    if (cur) return setMsg(`Added "${b.title}" to your library.`);
     await start(b, files);
   }
   async function finishAdd(items) {
@@ -151,16 +156,15 @@ export default function App() {
 
   return (
     <div className="app">
-      {cur ? (
-        <Player key={cur.book.id} {...cur} onSave={(p, k) => saveProgress(cur.book.id, p, k)} onBack={() => { setCur(null); refresh(); }} />
-      ) : (
+      {cur && <Player key={cur.book.id} {...cur} mini={!full} onSave={(p, k) => saveProgress(cur.book.id, p, k)} onBack={() => { setFull(false); refresh(); }} onExpand={() => setFull(true)} onClose={() => { setCur(null); refresh(); }} />}
+      {(!cur || !full) && (
         <main className="lib">
           <header><h1 className="word">AURIS</h1>{inst && <button className="txtbtn" onClick={() => { inst.prompt(); setInst(null); }}>Install</button>}<button className="txtbtn" onClick={toggleTheme}>{theme === 'dark' ? 'Light' : 'Dark'}</button><button className="txtbtn" onClick={() => setSetup(true)}>{device() || 'Device'}</button></header>
           <h2 className="hl"><span>Your</span> <b>Library</b></h2>
           {msg && <p className="note" onClick={() => setMsg('')}>{msg}</p>}
           {!books.length && <p className="empty">Your library is empty. Add an audiobook from this device. Select several files to add a book with multiple parts. Files are never uploaded.</p>}
-          <div className="grid">{books.map((b) => <Card key={b.id} b={b} onOpen={() => open(b)} onMenu={setMenu} />)}</div>
-          <button className="addbtn" onClick={add}>Add audiobook</button>
+          <div className={cur ? 'grid lifted' : 'grid'}>{books.map((b) => <Card key={b.id} b={b} onOpen={() => open(b)} onMenu={setMenu} />)}</div>
+          <button className={cur ? 'addbtn lifted' : 'addbtn'} onClick={add}>Add audiobook</button>
         </main>
       )}
       {menu && (
@@ -168,12 +172,12 @@ export default function App() {
           <h3>{menu.title}</h3>
           <button className="opt" onClick={() => { setAuto(false); setEdit(menu); setMenu(null); }}>Edit details</button>
           <button className="opt" onClick={() => { setAuto(true); setEdit(menu); setMenu(null); }}>Change cover</button>
-          <button className="opt danger" onClick={async () => { if (confirm('Remove this book from this device? Your listening position stays synced.')) { await removeBook(menu); setMenu(null); refresh(); } }}>Remove from this device</button>
+          <button className="opt danger" onClick={async () => { if (confirm('Remove this book from this device? Your listening position stays synced.')) { await removeBook(menu); if (cur?.book.id === menu.id) setCur(null); setMenu(null); refresh(); } }}>Remove from this device</button>
         </div></div>
       )}
       {naming && <Naming n={naming} onCancel={() => setNaming(null)} onDone={async (t) => { const n = naming; setNaming(null); try { await begin(await createBook(n.items, n.fps, n.id, n.m, t), n.items); } catch { setMsg('Could not add that audiobook.'); } }} />}
       {order && <Order items={order} onCancel={() => setOrder(null)} onDone={finishAdd} />}
-      {edit && <Edit b={edit} auto={auto} onClose={async () => { setEdit(null); await refresh(); }} />}
+      {edit && <Edit b={edit} auto={auto} onClose={async () => { setEdit(null); await refresh(); const f = cur && await getBook(cur.book.id); if (f) setCur((c) => c && { ...c, book: { ...c.book, title: f.title, author: f.author, coverUrl: f.coverUrl } }); }} />}
       {setup && <Setup onClose={() => { setSetup(false); syncMeta(); }} />}
     </div>
   );
@@ -240,7 +244,7 @@ function Card({ b, onOpen, onMenu }) {
   );
 }
 
-function Player({ book, files, onSave, onBack, onEdit }) {
+function Player({ book, files, mini, onSave, onBack, onExpand, onClose }) {
   const a = useRef(), urlRef = useRef(''), partRef = useRef(0), startAt = useRef(0), started = useRef(false);
   const cover = useCover(book);
   const [t, setT] = useState(0), [dur, setDur] = useState(0), [playing, setPlaying] = useState(false), [rate, setRate] = useState(1), [badge, setBadge] = useState(''), [part, setPart] = useState(0);
@@ -315,8 +319,18 @@ function Player({ book, files, onSave, onBack, onEdit }) {
 
   const speeds = [1, 1.25, 1.5, 1.75, 2, 0.75];
   return (
-    <section className="player">
+    <>
       <audio ref={a} onTimeUpdate={(e) => setT(e.target.currentTime)} onPlay={() => { started.current = true; setPlaying(true); }} onPause={() => { setPlaying(false); save(false); }} onEnded={ended} />
+      {mini ? (
+        <div className="mini" onClick={onExpand} role="button" aria-label="Open player">
+          <span className="mbar"><span style={{ width: (dur ? (t / dur) * 100 : 0) + '%' }} /></span>
+          <Scallop id="mini" src={cover} letter={book.title[0]} tight />
+          <span className="mt"><b>{book.title}</b><small>{book.author}</small></span>
+          <button className="mbtn main" aria-label={playing ? 'Pause' : 'Play'} onClick={(e) => { e.stopPropagation(); toggle(); }}>{playing ? <svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z" /></svg> : <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>}</button>
+          <button className="mbtn" aria-label="Close player" onClick={(e) => { e.stopPropagation(); onClose(); }}><svg className="x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+        </div>
+      ) : (
+    <section className="player">
       <div className="top">
         <button className="circ" onClick={onBack} aria-label="Back to library"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg></button>
         <span>Now listening</span>
@@ -338,6 +352,8 @@ function Player({ book, files, onSave, onBack, onEdit }) {
         <button className="sk" aria-label="Forward 10 seconds" onClick={() => skip(1)}><svg viewBox="0 0 24 24"><path d="M7 5v14l11-7z" /></svg><small>10</small></button>
       </div>
     </section>
+      )}
+    </>
   );
 }
 
