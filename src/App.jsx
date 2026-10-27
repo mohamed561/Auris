@@ -178,23 +178,43 @@ const blobPath = (R, a, n) => {
   for (let i = 0; i < 120; i++) { const th = (i / 120) * 2 * Math.PI, r = R * (1 + a * Math.cos(n * th)); pts.push(`${(r * Math.sin(th)).toFixed(1)},${(-r * Math.cos(th)).toFixed(1)}`); }
   return 'M' + pts.join('L') + 'Z';
 };
-const SHAPE = blobPath(78, 0.05, 9), ORBIT = blobPath(94, 0.04, 9);
+const SHAPE = blobPath(78, 0.05, 9), ORBIT = blobPath(92, 0.05, 9);
 
 // Scalloped cover. With p (0 to 1) a dot travels along an outline to show progress.
-function Scallop({ id, src, letter, p, tight }) {
-  const ref = useRef();
-  const [pt, setPt] = useState([0, -94]);
+function Scallop({ id, src, letter, p, tight, onSeek }) {
+  const ref = useRef(), svg = useRef(), drag = useRef(false);
+  const [pt, setPt] = useState([0, -92]);
+  const q = p == null ? 0 : Math.min(1, Math.max(0, p || 0));
   useEffect(() => {
     if (p == null || !ref.current) return;
-    const el = ref.current, q = el.getPointAtLength(el.getTotalLength() * Math.min(1, Math.max(0, p)));
-    setPt([q.x, q.y]);
-  }, [p]);
+    const el = ref.current, s = el.getPointAtLength(el.getTotalLength() * q);
+    setPt([s.x, s.y]);
+  }, [q]);
+  // Angle around the cover, starting at the top and going clockwise, becomes the position in the book.
+  const at = (e, start) => {
+    const r = svg.current.getBoundingClientRect(), dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+    if (start && Math.hypot(dx, dy) < r.width * 0.41) return false;
+    let a = Math.atan2(dx, -dy);
+    if (a < 0) a += 2 * Math.PI;
+    onSeek(a / (2 * Math.PI));
+    return true;
+  };
+  const seekProps = onSeek ? {
+    role: 'slider', 'aria-label': 'Seek', 'aria-valuenow': Math.round(q * 100), style: { touchAction: 'none', cursor: 'pointer' },
+    onPointerDown: (e) => { if (at(e, true)) { drag.current = true; e.currentTarget.setPointerCapture(e.pointerId); } },
+    onPointerMove: (e) => { if (drag.current) at(e); },
+    onPointerUp: () => { drag.current = false; }, onPointerCancel: () => { drag.current = false; },
+  } : { 'aria-hidden': 'true' };
   return (
-    <svg viewBox={tight ? '-84 -84 168 168' : '-100 -100 200 200'} className="blob" aria-hidden="true">
+    <svg ref={svg} viewBox={tight ? '-84 -84 168 168' : '-100 -100 200 200'} className="blob" {...seekProps}>
       <defs><clipPath id={id}><path d={SHAPE} /></clipPath></defs>
       <path d={SHAPE} className="bfill" />
       {src ? <image href={src} x="-78" y="-78" width="156" height="156" preserveAspectRatio="xMidYMid slice" clipPath={`url(#${id})`} /> : <text y="20">{letter}</text>}
-      {p != null && <><path ref={ref} d={ORBIT} className="orbit" /><circle cx={pt[0]} cy={pt[1]} r="3.6" className="dot" /></>}
+      {p != null && <>
+        <path ref={ref} d={ORBIT} className="track" />
+        <path d={ORBIT} pathLength="1" strokeDasharray={`${q} 2`} className="prog" />
+        <circle cx={pt[0]} cy={pt[1]} r="4.5" className="dot" />
+      </>}
     </svg>
   );
 }
@@ -297,7 +317,7 @@ function Player({ book, files, onSave, onBack, onEdit }) {
         <button className="circ" aria-label="Playback speed" onClick={() => { const r = speeds[speeds.indexOf(rate) + 1] || 1; setRate(r); a.current.playbackRate = r; }}>{rate}x</button>
       </div>
       <p className="clock"><b>{fmt(t)}</b> | {fmt(dur)}</p>
-      <div className="art"><Scallop id="pl" src={cover} letter={book.title[0]} p={dur ? t / dur : 0} />{badge && <span className="badge">{badge}</span>}</div>
+      <div className="art"><Scallop id="pl" src={cover} letter={book.title[0]} p={dur ? t / dur : 0} onSeek={(f) => dur && seek(f * dur)} />{badge && <span className="badge">{badge}</span>}</div>
       <h2 className="bt">{book.title}</h2><p className="by">{book.author}</p>
       {files.length > 1 && (
         <div className="partnav">
@@ -306,7 +326,6 @@ function Player({ book, files, onSave, onBack, onEdit }) {
           <button className="ghost" disabled={part === files.length - 1} onClick={() => load(part + 1, 0, playing)}>Next part</button>
         </div>
       )}
-      <input className="seek" type="range" min="0" max={dur || 0} step="1" value={t} aria-label="Seek" style={{ '--p': dur ? (t / dur) * 100 + '%' : '0%' }} onChange={(e) => seek(+e.target.value)} />
       <div className="ctl">
         <button className="sk" aria-label="Back 10 seconds" onClick={() => skip(-1)}><svg viewBox="0 0 24 24"><path d="M17 5v14L6 12z" /></svg><small>10</small></button>
         <button className="play" aria-label={playing ? 'Pause' : 'Play'} onClick={toggle}>{playing ? <svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z" /></svg> : <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>}</button>
