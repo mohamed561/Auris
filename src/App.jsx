@@ -603,3 +603,15 @@ function StorageBox({ books }) {
     <button className="opt danger" onClick={() => del(rows, 'all copies')}>Delete all copies</button>
   </>);
 }
+
+function Naming({ n, onCancel, onDone }) {
+  const [t, setT] = useState(n.guess);
+  return (
+    <div className="modal"><div className="sheet">
+      <h3>What is this book called?</h3>
+      <p className="by" style={{ margin: 0 }}>The file has no title. Enter the book name and AURIS finds the author and cover online.</p>
+      <label>Book name<input autoFocus value={t} onChange={(e) => setT(e.target.value)} /></label>
+      <div className="actions"><button className="ghost" onClick={onCancel}>Cancel</button><button className="primary" disabled={!t.trim()} onClick={() => onDone(t.trim())}>Continue</button></div>
+    </div></div>
+  );
+}
