@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { getAll, getBook, putBook, getHandle, putHandle, device, fmt, mime, cleanName, hashText, fingerprint, readMeta, searchBooks, pickFiles, openHandle, copyLocal, readLocal, wantCopy, removeBook, removeLocal, pull, pullAll, pushMeta, push, toItem } from './lib.js';
 
 const useCover = (b) => {
-  const u = useMemo(() => (b.cover ? URL.createObjectURL(b.cover) : ''), [b.cover]);
+  const u = useMemo(() => (b.cover instanceof Blob ? URL.createObjectURL(b.cover) : ''), [b.cover]);
   return b.coverUrl || u;
 };
+const cleanCh = (a) => (Array.isArray(a) ? a : []).map((c) => ({ title: String(c?.title ?? ''), start: Number(c?.start) || 0 }));
 const cancelled = (e) => e?.name === 'AbortError' || e?.message === 'none';
 
 export default function App() {
@@ -52,7 +53,7 @@ export default function App() {
         if (r && r.device !== device() && r.updatedAt > (b.updatedAt || 0)) { await putBook({ ...b, part: r.part || 0, position: r.position, finished: r.finished, updatedAt: r.updatedAt }); changed = true; }
       }
       const ids = new Set((await getAll()).map((b) => b.id));
-      setRemote(Object.entries(meta).filter(([id]) => !ids.has(id)).map(([id, m]) => ({ id, title: m.title, author: m.author, coverUrl: m.coverUrl, remote: true })));
+      setRemote(Object.entries(meta).filter(([id]) => !ids.has(id)).map(([id, m]) => ({ id, title: String(m.title || ''), author: String(m.author || ''), coverUrl: String(m.coverUrl || ''), remote: true })));
       if (changed) refresh();
     } catch {}
   };
@@ -134,7 +135,7 @@ export default function App() {
     if (!rm) {
       try { const [h] = await searchBooks(`${title} ${m.author || ''}`.trim()); if (h) { author = author || h.author; coverUrl = h.coverUrl; } } catch {}
     }
-    const b = { id, title: rm?.title || title, author, cover: m.cover, chapters: m.chapters, coverUrl, metaAt: rm?.metaAt || Date.now(), parts: items.map((it, i) => ({ name: it.file.name, fp: fps[i] })), part: 0, position: 0, updatedAt: 0, addedAt: Date.now() };
+    const b = { id, title: rm?.title || title, author, cover: m.cover, chapters: cleanCh(m.chapters), coverUrl, metaAt: rm?.metaAt || Date.now(), parts: items.map((it, i) => ({ name: it.file.name, fp: fps[i] })), part: 0, position: 0, updatedAt: 0, addedAt: Date.now() };
     await putBook(b);
     if (!rm) pushMeta(b).catch(() => {});
     return b;
@@ -162,7 +163,7 @@ export default function App() {
     } catch { setMsg('Could not add that audiobook.'); }
   }
 
-  const cmp = { played: (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0) || b.addedAt - a.addedAt, added: (a, b) => b.addedAt - a.addedAt, az: (a, b) => a.title.localeCompare(b.title) }[sort];
+  const cmp = { played: (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0) || b.addedAt - a.addedAt, added: (a, b) => (b.addedAt || 0) - (a.addedAt || 0), az: (a, b) => String(a.title).localeCompare(String(b.title)) }[sort];
   const match = (b) => `${b.title} ${b.author || ''}`.toLowerCase().includes(q.toLowerCase());
   const active = books.filter((b) => !b.finished && match(b)).sort(cmp);
   const ghosts = remote.filter((r) => !hidden.includes(r.id) && !books.some((b) => b.id === r.id) && match(r));
@@ -263,7 +264,7 @@ function Card({ b, onOpen, onMenu }) {
   return (
     <div className={b.remote ? 'card ghost' : 'card'} onPointerDown={() => { fired.current = false; timer.current = setTimeout(() => { fired.current = true; onMenu(b); }, 550); }} onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop}
       onContextMenu={(e) => { e.preventDefault(); fired.current = true; onMenu(b); }} onClick={() => { if (!fired.current) onOpen(); }}>
-      <Scallop id={'c' + b.id.slice(0, 10)} src={c} letter={b.title[0]} tight />
+      <Scallop id={'c' + b.id.slice(0, 10)} src={c} letter={(b.title || '?')[0]} tight />
       <button className="dots" aria-label={`Options for ${b.title}`} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onMenu(b); }}><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" /></svg></button>
       <b>{b.title}</b><small>{b.author || info}</small>{b.author && <small>{info}</small>}
     </div>
@@ -276,7 +277,7 @@ function Player({ book, files, mini, onSave, onBack, onExpand, onClose }) {
   const [t, setT] = useState(0), [dur, setDur] = useState(0), [playing, setPlaying] = useState(false), [rate, setRate] = useState(1), [badge, setBadge] = useState(''), [part, setPart] = useState(0);
   const tap = useRef({ n: 0, dir: 0, timer: 0 });
   const [sheet, setSheet] = useState(null), [sleep, setSleep] = useState(null), [boosted, setBoosted] = useState(false);
-  const [chs, setChs] = useState(book.chapters || []), [marks, setMarks] = useState(book.marks || []), [note, setNote] = useState('');
+  const [chs, setChs] = useState(cleanCh(book.chapters)), [marks, setMarks] = useState(book.marks || []), [note, setNote] = useState('');
   const sleepRef = useRef(null), ac = useRef(null), gain = useRef(null);
   sleepRef.current = sleep;
   const [fs, setFs] = useState(false);
@@ -303,7 +304,7 @@ function Player({ book, files, mini, onSave, onBack, onExpand, onClose }) {
     const iv = setInterval(() => { const el = a.current, left = sleep.end - Date.now(); if (left <= 0) { el.pause(); el.volume = 1; setSleep(null); } else if (left < 5000) el.volume = Math.max(0, left / 5000); }, 250);
     return () => clearInterval(iv);
   }, [sleep]);
-  useEffect(() => { if (book.chapters !== undefined || files.length !== 1) return; readMeta(files[0]).then(async (m) => { setChs(m.chapters); await patchBook({ chapters: m.chapters }); }); }, []);
+  useEffect(() => { if (book.chapters !== undefined || files.length !== 1) return; readMeta(files[0]).then(async (m) => { setChs(cleanCh(m.chapters)); await patchBook({ chapters: m.chapters }); }); }, []);
 
   const load = (i, at = 0, play = false) => {
     const el = a.current;
@@ -380,7 +381,7 @@ function Player({ book, files, mini, onSave, onBack, onExpand, onClose }) {
       {mini ? (
         <div className="mini" onClick={onExpand} role="button" aria-label="Open player">
           <span className="mbar"><span style={{ width: (dur ? (t / dur) * 100 : 0) + '%' }} /></span>
-          <Scallop id="mini" src={cover} letter={book.title[0]} tight />
+          <Scallop id="mini" src={cover} letter={(book.title || '?')[0]} tight />
           <span className="mt"><b>{book.title}</b><small>{book.author}</small></span>
           <button className="mbtn main" aria-label={playing ? 'Pause' : 'Play'} onClick={(e) => { e.stopPropagation(); toggle(); }}>{playing ? <svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z" /></svg> : <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>}</button>
           <button className="mbtn" aria-label="Close player" onClick={(e) => { e.stopPropagation(); onClose(); }}><svg className="x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
@@ -393,7 +394,7 @@ function Player({ book, files, mini, onSave, onBack, onExpand, onClose }) {
         <button className="circ" aria-label="Playback speed" onClick={() => { const r = speeds[speeds.indexOf(rate) + 1] || 1; setRate(r); a.current.playbackRate = r; }}>{rate}x</button>
       </div>
       <p className="clock"><b>{fmt(t)}</b> | {fmt(dur)}</p>
-      <div className="art"><Scallop id="pl" src={cover} letter={book.title[0]} p={dur ? t / dur : 0} onSeek={(f) => dur && seek(f * dur)} />{badge && <span className="badge">{badge}</span>}</div>
+      <div className="art"><Scallop id="pl" src={cover} letter={(book.title || '?')[0]} p={dur ? t / dur : 0} onSeek={(f) => dur && seek(f * dur)} />{badge && <span className="badge">{badge}</span>}</div>
       <h2 className="bt">{book.title}</h2><p className="by">{book.author}</p>
       {chap && <p className="by chap">{chap.title}</p>}
       {files.length > 1 && (
@@ -418,7 +419,7 @@ function Player({ book, files, mini, onSave, onBack, onExpand, onClose }) {
       {fs && (
         <div className="fs">
           <button className="circ fsx" onClick={leaveFs} aria-label="Exit full screen"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
-          <div className="fsart"><Scallop id="fs" src={cover} letter={book.title[0]} p={dur ? t / dur : 0} onSeek={(f) => dur && seek(f * dur)} />{badge && <span className="badge">{badge}</span>}</div>
+          <div className="fsart"><Scallop id="fs" src={cover} letter={(book.title || '?')[0]} p={dur ? t / dur : 0} onSeek={(f) => dur && seek(f * dur)} />{badge && <span className="badge">{badge}</span>}</div>
           <p className="fstime"><b>{fmt(t)}</b> | {fmt(dur)}</p>
           <h2 className="bt">{book.title}</h2>
           <div className="ctl">
